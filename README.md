@@ -53,6 +53,35 @@ Edit `~/.config/opencode/opencode.json`:
 
 5) In the TUI, run `/models` and select `codex-exec/gpt-5.2-codex-medium`.
 
+## Setup for LLM Agents
+
+If you are an LLM agent configuring this on a user's machine, follow this checklist:
+
+Step 0: Confirm prerequisites
+- `codex` CLI is installed and on PATH.
+- User has authenticated with `codex login` if required.
+
+Step 1: Install the provider
+```bash
+git clone https://github.com/JakkuSakura/opencode-codex-exec-provider
+```
+
+Step 2: Configure OpenCode
+- Add the provider config in `~/.config/opencode/opencode.json` (see Setup section above).
+- Use `file://` path for the local repo.
+
+Step 3: Verify
+```bash
+opencode --version
+```
+Then in the OpenCode TUI:
+- Run `/models`
+- Select `codex-exec/gpt-5.2-codex-medium`
+- Run a small prompt and confirm output
+
+Step 4: Debug if needed
+- If you see `Reading prompt from stdin...`, set `emptyPromptFallback` to `json` and retry.
+
 ## Notes
 
 - This provider is text-only. Images and files are represented as placeholders in the prompt.
