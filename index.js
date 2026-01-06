@@ -97,24 +97,6 @@ function extractText(content) {
   return parts.join("\n").trim();
 }
 
-function buildArgs(modelId, options) {
-  const args = ["exec", "--json"];
-
-  if (options?.skipGitRepoCheck !== false) {
-    args.push("--skip-git-repo-check");
-  }
-
-  if (modelId) {
-    args.push("--model", modelId);
-  }
-
-  if (Array.isArray(options?.args)) {
-    args.push(...options.args);
-  }
-
-  return args;
-}
-
 function parseJsonLine(line) {
   if (!line.trim()) return null;
   try {
@@ -124,89 +106,202 @@ function parseJsonLine(line) {
   }
 }
 
-function mapUsage(turnUsage) {
-  if (!turnUsage) return DEFAULT_USAGE;
-
+function mapUsageFromTokenUsage(tokenUsage) {
+  if (!tokenUsage?.last) return DEFAULT_USAGE;
+  const last = tokenUsage.last;
   return {
     inputTokens: {
-      total: turnUsage.input_tokens ?? undefined,
+      total: last.inputTokens ?? undefined,
       noCache: undefined,
-      cacheRead: turnUsage.cached_input_tokens ?? undefined,
+      cacheRead: last.cachedInputTokens ?? undefined,
       cacheWrite: undefined,
     },
     outputTokens: {
-      total: turnUsage.output_tokens ?? undefined,
-      text: turnUsage.output_tokens ?? undefined,
-      reasoning: undefined,
+      total: last.outputTokens ?? undefined,
+      text: last.outputTokens ?? undefined,
+      reasoning: last.reasoningOutputTokens ?? undefined,
     },
-    raw: turnUsage,
+    raw: tokenUsage,
   };
 }
 
-function runCodexExec({
-  promptText,
-  modelId,
-  options,
-  onEvent,
-  onStderr,
-  abortSignal,
-}) {
-  const codexPath = options?.codexPath ?? "codex";
-  const args = buildArgs(modelId, options);
-  const env = {
-    ...process.env,
-    ...(options?.env ?? {}),
-  };
+function resolveNewApprovalDecision(options, params) {
+  const decision = options?.approvalDecision ?? "accept";
+  if (decision === "acceptWithExecpolicyAmendment") {
+    const amendment = Array.isArray(params?.proposedExecpolicyAmendment)
+      ? params.proposedExecpolicyAmendment
+      : [];
+    return { acceptWithExecpolicyAmendment: { execpolicy_amendment: amendment } };
+  }
+  return decision;
+}
 
-  const child = spawn(codexPath, args, {
-    env,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+function resolveLegacyApprovalDecision(options) {
+  return options?.legacyApprovalDecision ?? "approved";
+}
 
-  if (abortSignal) {
-    if (abortSignal.aborted) {
-      child.kill("SIGTERM");
-    } else {
-      abortSignal.addEventListener("abort", () => child.kill("SIGTERM"), { once: true });
+class AppServerClient {
+  constructor(options) {
+    this.options = options ?? {};
+    this.child = null;
+    this.stdoutBuffer = "";
+    this.stderrBuffer = "";
+    this.pending = new Map();
+    this.listeners = new Set();
+    this.nextId = 1;
+    this.initialized = null;
+    this.queue = Promise.resolve();
+  }
+
+  respond(id, result) {
+    if (!this.child || this.child.killed) return;
+    const payload = { id, result };
+    this.child.stdin.write(`${JSON.stringify(payload)}\n`);
+  }
+
+  handleServerRequest(message) {
+    const method = message.method;
+    const params = message.params ?? {};
+    if (method === "item/commandExecution/requestApproval") {
+      return { decision: resolveNewApprovalDecision(this.options, params) };
+    }
+    if (method === "item/fileChange/requestApproval") {
+      return { decision: resolveNewApprovalDecision(this.options, params) };
+    }
+    if (method === "execCommandApproval") {
+      return { decision: resolveLegacyApprovalDecision(this.options) };
+    }
+    if (method === "applyPatchApproval") {
+      return { decision: resolveLegacyApprovalDecision(this.options) };
+    }
+    return null;
+  }
+
+  enqueue(fn) {
+    const run = this.queue.then(() => fn());
+    this.queue = run.catch(() => {});
+    return run;
+  }
+
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  emit(message) {
+    for (const listener of this.listeners) {
+      listener(message);
     }
   }
 
-  child.stdin.setDefaultEncoding("utf8");
-  child.stdin.write(promptText);
-  child.stdin.end();
+  ensureProcess() {
+    if (this.child && !this.child.killed) return;
+    const codexPath = this.options.codexPath ?? "codex";
+    const args = ["app-server"];
+    if (Array.isArray(this.options.args)) args.push(...this.options.args);
+    const env = {
+      ...process.env,
+      ...(this.options.env ?? {}),
+    };
 
-  let stdoutBuffer = "";
-  let stderrBuffer = "";
-
-  child.stdout.on("data", (chunk) => {
-    stdoutBuffer += chunk.toString("utf8");
-    let idx;
-    while ((idx = stdoutBuffer.indexOf("\n")) !== -1) {
-      const line = stdoutBuffer.slice(0, idx);
-      stdoutBuffer = stdoutBuffer.slice(idx + 1);
-      const event = parseJsonLine(line);
-      if (event) onEvent(event);
-    }
-  });
-
-  child.stderr.on("data", (chunk) => {
-    const text = chunk.toString("utf8");
-    stderrBuffer += text;
-    if (onStderr) onStderr(text);
-  });
-
-  return new Promise((resolve) => {
-    child.on("close", (code, signal) => {
-      if (stdoutBuffer.trim()) {
-        const event = parseJsonLine(stdoutBuffer);
-        if (event) onEvent(event);
-      }
-      resolve({ code, signal, stderr: stderrBuffer });
+    const child = spawn(codexPath, args, {
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
     });
-  });
+    this.child = child;
+    this.stdoutBuffer = "";
+    this.stderrBuffer = "";
+    this.initialized = null;
+
+    child.stdout.on("data", (chunk) => {
+      this.stdoutBuffer += chunk.toString("utf8");
+      let idx;
+      while ((idx = this.stdoutBuffer.indexOf("\n")) !== -1) {
+        const line = this.stdoutBuffer.slice(0, idx);
+        this.stdoutBuffer = this.stdoutBuffer.slice(idx + 1);
+        const message = parseJsonLine(line);
+        if (!message) continue;
+        if (message.type === "parse.error") {
+          this.emit(message);
+          continue;
+        }
+        if (Object.prototype.hasOwnProperty.call(message, "id")) {
+          const pending = this.pending.get(message.id);
+          if (pending) {
+            this.pending.delete(message.id);
+            if (message.error) {
+              pending.reject(new Error(JSON.stringify(message.error)));
+            } else {
+              pending.resolve(message.result);
+            }
+            continue;
+          }
+          if (message.method) {
+            const response = this.handleServerRequest(message);
+            if (response) {
+              this.respond(message.id, response);
+              continue;
+            }
+          }
+        }
+        if (message.method) {
+          this.emit(message);
+        }
+      }
+    });
+
+    child.stderr.on("data", (chunk) => {
+      this.stderrBuffer += chunk.toString("utf8");
+    });
+
+    child.on("close", (code, signal) => {
+      const error = new Error(
+        this.stderrBuffer.trim() ||
+          `codex app-server exited with code ${code ?? "unknown"} (${signal ?? "no signal"})`
+      );
+      for (const pending of this.pending.values()) {
+        pending.reject(error);
+      }
+      this.pending.clear();
+      this.child = null;
+      this.initialized = null;
+      this.emit({ type: "process.closed", error });
+    });
+  }
+
+  request(method, params) {
+    this.ensureProcess();
+    const id = this.nextId++;
+    const payload = { id, method, params };
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.child.stdin.write(`${JSON.stringify(payload)}\n`);
+    });
+  }
+
+  notify(method, params) {
+    this.ensureProcess();
+    const payload = { method, params };
+    this.child.stdin.write(`${JSON.stringify(payload)}\n`);
+  }
+
+  async ensureInitialized() {
+    if (this.initialized) return this.initialized;
+    const params = {
+      clientInfo: {
+        name: "opencode-codex-app-server-provider",
+        title: "OpenCode Codex App Server Provider",
+        version: "0.1.0",
+      },
+    };
+    this.initialized = this.request("initialize", params).then(() => {
+      this.notify("initialized");
+    });
+    return this.initialized;
+  }
 }
 
-function createLanguageModel({ provider, modelId, options }) {
+function createLanguageModel({ provider, modelId, options, client }) {
   return {
     specificationVersion: "v3",
     provider,
@@ -220,7 +315,7 @@ function createLanguageModel({ provider, modelId, options }) {
       const warnings = [];
 
       if (!promptText) {
-        warnings.push({ type: "other", message: "Empty prompt; skipping codex exec." });
+        warnings.push({ type: "other", message: "Empty prompt; skipping codex app-server." });
         return {
           content: [{ type: "text", text: "" }],
           finishReason: { unified: "other", raw: "empty-prompt" },
@@ -229,36 +324,152 @@ function createLanguageModel({ provider, modelId, options }) {
         };
       }
 
-      await runCodexExec({
-        promptText,
-        modelId,
-        options,
-        abortSignal: callOptions.abortSignal,
-        onEvent: (event) => {
-          if (callOptions.includeRawChunks) {
-            // no-op for non-stream generate
+      try {
+        await client.enqueue(async () => {
+          await client.ensureInitialized();
+          const threadResult = await client.request("thread/start", {
+            model: options?.modelOverride ?? modelId ?? null,
+            modelProvider: options?.modelProvider ?? null,
+            cwd: options?.cwd ?? process.cwd(),
+            approvalPolicy: options?.approvalPolicy ?? null,
+            sandbox: options?.sandboxMode ?? null,
+            config: options?.config ?? null,
+            baseInstructions: options?.baseInstructions ?? null,
+            developerInstructions: options?.developerInstructions ?? null,
+            experimentalRawEvents: options?.experimentalRawEvents ?? false,
+          });
+          const threadId = threadResult?.thread?.id ?? threadResult?.threadId;
+          if (!threadId) {
+            throw new Error("codex app-server did not return a thread id");
           }
 
-          if (event.type === "item.completed") {
-            const item = event.item;
-            if (item?.type === "agent_message" && item.text) {
-              text += item.text;
+          let sawTextDelta = false;
+          let sawReasoningDelta = false;
+          let activeTurnId = null;
+          const buffered = [];
+          let resolveCompletion;
+          let rejectCompletion;
+          const completion = new Promise((resolve, reject) => {
+            resolveCompletion = resolve;
+            rejectCompletion = reject;
+          });
+
+          const unsubscribe = client.subscribe((message) => {
+            if (message.type === "parse.error") {
+              rejectCompletion(new Error("Failed to parse codex app-server JSONL output"));
+              return;
             }
-            if (options?.includeReasoning && item?.type === "reasoning" && item.text) {
-              text += `\n\n[Reasoning]\n${item.text}`;
+            if (!message.method) return;
+            const params = message.params;
+            if (!params || params.threadId !== threadId) return;
+            if (!activeTurnId && params.turnId) {
+              activeTurnId = params.turnId;
+            }
+            if (!activeTurnId) {
+              buffered.push(message);
+              return;
+            }
+            if (params.turnId && params.turnId !== activeTurnId) return;
+
+            if (message.method === "item/agentMessage/delta") {
+              sawTextDelta = true;
+              text += params.delta ?? "";
+            }
+            if (message.method === "item/reasoning/textDelta" && options?.includeReasoning) {
+              sawReasoningDelta = true;
+              text += params.delta ?? "";
+            }
+            if (message.method === "item/completed") {
+              const item = params.item;
+              if (item?.type === "agentMessage" && item.text && !sawTextDelta) {
+                text += item.text;
+              }
+              if (item?.type === "reasoning" && options?.includeReasoning && item.content?.length) {
+                if (!sawReasoningDelta) {
+                  text += item.content.join("\n");
+                }
+              }
+            }
+            if (message.method === "thread/tokenUsage/updated") {
+              usage = mapUsageFromTokenUsage(params.tokenUsage);
+            }
+            if (message.method === "turn/completed") {
+              finishReason = { unified: "stop", raw: message.method };
+              resolveCompletion(params.turn);
+            }
+            if (message.method === "error") {
+              finishReason = { unified: "error", raw: "error" };
+              rejectCompletion(new Error(params?.message ?? "codex app-server error"));
+            }
+          });
+
+          const turnResult = await client.request("turn/start", {
+            threadId,
+            input: [{ type: "text", text: promptText }],
+            cwd: options?.cwd ?? null,
+            approvalPolicy: options?.approvalPolicy ?? null,
+            sandboxPolicy: null,
+            model: options?.modelOverride ?? modelId ?? null,
+            effort: options?.reasoningEffort ?? null,
+            summary: options?.reasoningSummary ?? null,
+          });
+          activeTurnId = activeTurnId ?? turnResult?.turn?.id ?? null;
+          if (activeTurnId) {
+            for (const message of buffered) {
+              const params = message.params;
+              if (params?.turnId && params.turnId !== activeTurnId) continue;
+              if (message.method === "item/agentMessage/delta") {
+                sawTextDelta = true;
+                text += params.delta ?? "";
+              }
+              if (message.method === "item/reasoning/textDelta" && options?.includeReasoning) {
+                sawReasoningDelta = true;
+                text += params.delta ?? "";
+              }
+              if (message.method === "item/completed") {
+                const item = params.item;
+                if (item?.type === "agentMessage" && item.text && !sawTextDelta) {
+                  text += item.text;
+                }
+                if (item?.type === "reasoning" && options?.includeReasoning && item.content?.length) {
+                  if (!sawReasoningDelta) {
+                    text += item.content.join("\n");
+                  }
+                }
+              }
+              if (message.method === "thread/tokenUsage/updated") {
+                usage = mapUsageFromTokenUsage(params.tokenUsage);
+              }
+              if (message.method === "turn/completed") {
+                finishReason = { unified: "stop", raw: message.method };
+                resolveCompletion(params.turn);
+              }
             }
           }
 
-          if (event.type === "turn.completed") {
-            usage = mapUsage(event.usage);
-            finishReason = { unified: "stop", raw: "turn.completed" };
+          if (callOptions.abortSignal) {
+            const abortHandler = () => {
+              if (threadId && activeTurnId) {
+                client.request("turn/interrupt", { threadId, turnId: activeTurnId }).catch(() => {});
+              }
+            };
+            if (callOptions.abortSignal.aborted) {
+              abortHandler();
+            } else {
+              callOptions.abortSignal.addEventListener("abort", abortHandler, { once: true });
+            }
           }
 
-          if (event.type === "parse.error") {
-            finishReason = { unified: "error", raw: "parse.error" };
+          try {
+            await completion;
+          } finally {
+            unsubscribe();
           }
-        },
-      });
+        });
+      } catch (error) {
+        warnings.push({ type: "other", message: error?.message ?? "codex app-server error" });
+        finishReason = { unified: "error", raw: "app-server-error" };
+      }
 
       return {
         content: [{ type: "text", text }],
@@ -270,19 +481,20 @@ function createLanguageModel({ provider, modelId, options }) {
 
     async doStream(callOptions) {
       const promptText = buildPrompt(callOptions.prompt, options);
-
       let usage = DEFAULT_USAGE;
       let finishReason = { unified: "other", raw: undefined };
       const textId = "text-1";
       const reasoningId = "reasoning-1";
       let textStarted = false;
       let reasoningStarted = false;
+      let sawTextDelta = false;
+      let sawReasoningDelta = false;
 
       const stream = new ReadableStream({
         start(controller) {
           const warnings = [];
           if (!promptText) {
-            warnings.push({ type: "other", message: "Empty prompt; skipping codex exec." });
+            warnings.push({ type: "other", message: "Empty prompt; skipping codex app-server." });
           }
           controller.enqueue({ type: "stream-start", warnings });
 
@@ -296,68 +508,203 @@ function createLanguageModel({ provider, modelId, options }) {
             return;
           }
 
-          runCodexExec({
-            promptText,
-            modelId,
-            options,
-            abortSignal: callOptions.abortSignal,
-            onEvent: (event) => {
-              if (callOptions.includeRawChunks) {
-                controller.enqueue({ type: "raw", rawValue: event });
-              }
+          client.enqueue(async () => {
+            await client.ensureInitialized();
+            const threadResult = await client.request("thread/start", {
+              model: options?.modelOverride ?? modelId ?? null,
+              modelProvider: options?.modelProvider ?? null,
+              cwd: options?.cwd ?? process.cwd(),
+              approvalPolicy: options?.approvalPolicy ?? null,
+              sandbox: options?.sandboxMode ?? null,
+              config: options?.config ?? null,
+              baseInstructions: options?.baseInstructions ?? null,
+              developerInstructions: options?.developerInstructions ?? null,
+              experimentalRawEvents: options?.experimentalRawEvents ?? false,
+            });
+            const threadId = threadResult?.thread?.id ?? threadResult?.threadId;
+            if (!threadId) {
+              throw new Error("codex app-server did not return a thread id");
+            }
 
-              if (event.type === "item.completed") {
-                const item = event.item;
-                if (item?.type === "agent_message" && item.text) {
+            let activeTurnId = null;
+            const buffered = [];
+            let resolveCompletion;
+            let rejectCompletion;
+            const completion = new Promise((resolve, reject) => {
+              resolveCompletion = resolve;
+              rejectCompletion = reject;
+            });
+
+            const unsubscribe = client.subscribe((message) => {
+              if (message.type === "parse.error") {
+                controller.enqueue({ type: "error", error: new Error("Failed to parse codex app-server JSONL output") });
+                rejectCompletion(new Error("Failed to parse codex app-server JSONL output"));
+                return;
+              }
+              if (!message.method) return;
+              const params = message.params;
+              if (!params || params.threadId !== threadId) return;
+              if (!activeTurnId && params.turnId) {
+                activeTurnId = params.turnId;
+              }
+              if (!activeTurnId) {
+                buffered.push(message);
+                return;
+              }
+              if (params.turnId && params.turnId !== activeTurnId) return;
+
+              if (message.method === "item/agentMessage/delta") {
+                sawTextDelta = true;
+                if (!textStarted) {
+                  controller.enqueue({ type: "text-start", id: textId });
+                  textStarted = true;
+                }
+                controller.enqueue({ type: "text-delta", id: textId, delta: params.delta ?? "" });
+              }
+              if (message.method === "item/reasoning/textDelta" && options?.includeReasoning) {
+                sawReasoningDelta = true;
+                if (!reasoningStarted) {
+                  controller.enqueue({ type: "reasoning-start", id: reasoningId });
+                  reasoningStarted = true;
+                }
+                controller.enqueue({ type: "reasoning-delta", id: reasoningId, delta: params.delta ?? "" });
+              }
+              if (message.method === "item/completed") {
+                const item = params.item;
+                if (item?.type === "agentMessage" && item.text && !sawTextDelta) {
                   if (!textStarted) {
                     controller.enqueue({ type: "text-start", id: textId });
                     textStarted = true;
                   }
                   controller.enqueue({ type: "text-delta", id: textId, delta: item.text });
                 }
+                if (item?.type === "reasoning" && options?.includeReasoning && item.content?.length) {
+                  if (!sawReasoningDelta) {
+                    if (!reasoningStarted) {
+                      controller.enqueue({ type: "reasoning-start", id: reasoningId });
+                      reasoningStarted = true;
+                    }
+                    controller.enqueue({ type: "reasoning-delta", id: reasoningId, delta: item.content.join("\n") });
+                  }
+                }
+              }
+              if (message.method === "thread/tokenUsage/updated") {
+                usage = mapUsageFromTokenUsage(params.tokenUsage);
+              }
+              if (message.method === "turn/completed") {
+                finishReason = { unified: "stop", raw: message.method };
+                resolveCompletion(params.turn);
+              }
+              if (message.method === "error") {
+                finishReason = { unified: "error", raw: "error" };
+                controller.enqueue({ type: "error", error: new Error(params?.message ?? "codex app-server error") });
+                rejectCompletion(new Error(params?.message ?? "codex app-server error"));
+              }
+            });
 
-                if (options?.includeReasoning && item?.type === "reasoning" && item.text) {
+            const turnResult = await client.request("turn/start", {
+              threadId,
+              input: [{ type: "text", text: promptText }],
+              cwd: options?.cwd ?? null,
+              approvalPolicy: options?.approvalPolicy ?? null,
+              sandboxPolicy: null,
+              model: options?.modelOverride ?? modelId ?? null,
+              effort: options?.reasoningEffort ?? null,
+              summary: options?.reasoningSummary ?? null,
+            });
+            activeTurnId = activeTurnId ?? turnResult?.turn?.id ?? null;
+            if (activeTurnId) {
+              for (const message of buffered) {
+                const params = message.params;
+                if (params?.turnId && params.turnId !== activeTurnId) continue;
+                if (message.method === "item/agentMessage/delta") {
+                  sawTextDelta = true;
+                  if (!textStarted) {
+                    controller.enqueue({ type: "text-start", id: textId });
+                    textStarted = true;
+                  }
+                  controller.enqueue({ type: "text-delta", id: textId, delta: params.delta ?? "" });
+                }
+                if (message.method === "item/reasoning/textDelta" && options?.includeReasoning) {
+                  sawReasoningDelta = true;
                   if (!reasoningStarted) {
                     controller.enqueue({ type: "reasoning-start", id: reasoningId });
                     reasoningStarted = true;
                   }
-                  controller.enqueue({ type: "reasoning-delta", id: reasoningId, delta: item.text });
+                  controller.enqueue({ type: "reasoning-delta", id: reasoningId, delta: params.delta ?? "" });
+                }
+                if (message.method === "item/completed") {
+                  const item = params.item;
+                  if (item?.type === "agentMessage" && item.text && !sawTextDelta) {
+                    if (!textStarted) {
+                      controller.enqueue({ type: "text-start", id: textId });
+                      textStarted = true;
+                    }
+                    controller.enqueue({ type: "text-delta", id: textId, delta: item.text });
+                  }
+                  if (item?.type === "reasoning" && options?.includeReasoning && item.content?.length) {
+                    if (!sawReasoningDelta) {
+                      if (!reasoningStarted) {
+                        controller.enqueue({ type: "reasoning-start", id: reasoningId });
+                        reasoningStarted = true;
+                      }
+                      controller.enqueue({ type: "reasoning-delta", id: reasoningId, delta: item.content.join("\n") });
+                    }
+                  }
+                }
+                if (message.method === "thread/tokenUsage/updated") {
+                  usage = mapUsageFromTokenUsage(params.tokenUsage);
+                }
+                if (message.method === "turn/completed") {
+                  finishReason = { unified: "stop", raw: message.method };
+                  resolveCompletion(params.turn);
                 }
               }
+            }
 
-              if (event.type === "turn.completed") {
-                usage = mapUsage(event.usage);
-                finishReason = { unified: "stop", raw: "turn.completed" };
+            if (callOptions.abortSignal) {
+              const abortHandler = () => {
+                if (threadId && activeTurnId) {
+                  client.request("turn/interrupt", { threadId, turnId: activeTurnId }).catch(() => {});
+                }
+              };
+              if (callOptions.abortSignal.aborted) {
+                abortHandler();
+              } else {
+                callOptions.abortSignal.addEventListener("abort", abortHandler, { once: true });
               }
+            }
 
-              if (event.type === "parse.error") {
-                controller.enqueue({ type: "error", error: new Error("Failed to parse codex JSONL output") });
-                finishReason = { unified: "error", raw: "parse.error" };
+            try {
+              await completion;
+            } finally {
+              unsubscribe();
+            }
+          }).then(
+            () => {
+              if (reasoningStarted) {
+                controller.enqueue({ type: "reasoning-end", id: reasoningId });
               }
+              if (textStarted) {
+                controller.enqueue({ type: "text-end", id: textId });
+              }
+              controller.enqueue({
+                type: "finish",
+                usage,
+                finishReason,
+              });
+              controller.close();
             },
-          }).then(({ code, signal, stderr }) => {
-            if (stderr) {
-              controller.enqueue({ type: "error", error: new Error(stderr.trim()) });
-              finishReason = { unified: "error", raw: "stderr" };
+            (error) => {
+              controller.enqueue({ type: "error", error });
+              controller.enqueue({
+                type: "finish",
+                usage,
+                finishReason: { unified: "error", raw: "app-server-error" },
+              });
+              controller.close();
             }
-
-            if (code !== 0) {
-              finishReason = { unified: "error", raw: signal ?? String(code) };
-            }
-
-            if (reasoningStarted) {
-              controller.enqueue({ type: "reasoning-end", id: reasoningId });
-            }
-            if (textStarted) {
-              controller.enqueue({ type: "text-end", id: textId });
-            }
-            controller.enqueue({
-              type: "finish",
-              usage,
-              finishReason,
-            });
-            controller.close();
-          });
+          );
         },
         cancel() {
           // handled by abort signal if provided
@@ -369,19 +716,20 @@ function createLanguageModel({ provider, modelId, options }) {
   };
 }
 
-export function createCodexExec(options = {}) {
-  const providerId = options.name ?? "codex-exec";
+export function createCodexAppServer(options = {}) {
+  const providerId = options.name ?? "codex-app-server";
+  const client = new AppServerClient(options);
 
   const provider = {
     specificationVersion: "v3",
     languageModel(modelId) {
-      return createLanguageModel({ provider: providerId, modelId, options });
+      return createLanguageModel({ provider: providerId, modelId, options, client });
     },
     embeddingModel() {
-      throw new Error("codex-exec does not support embeddings");
+      throw new Error("codex-app-server does not support embeddings");
     },
     imageModel() {
-      throw new Error("codex-exec does not support images");
+      throw new Error("codex-app-server does not support images");
     },
   };
 

@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AccountUpdatedNotification",
+  "type": "object",
+  "properties": {
+    "authMode": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AuthMode"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "AuthMode": {
+      "type": "string",
+      "enum": [
+        "apikey",
+        "chatgpt"
+      ]
+    }
+  }
+}

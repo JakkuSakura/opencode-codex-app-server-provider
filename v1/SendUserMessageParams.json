@@ -1,0 +1,113 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SendUserMessageParams",
+  "type": "object",
+  "required": [
+    "conversationId",
+    "items"
+  ],
+  "properties": {
+    "conversationId": {
+      "$ref": "#/definitions/ConversationId"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/InputItem"
+      }
+    }
+  },
+  "definitions": {
+    "ConversationId": {
+      "type": "string"
+    },
+    "InputItem": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "data",
+            "type"
+          ],
+          "properties": {
+            "data": {
+              "type": "object",
+              "required": [
+                "text"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string"
+                }
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "text"
+              ],
+              "title": "TextInputItemType"
+            }
+          },
+          "title": "TextInputItem"
+        },
+        {
+          "type": "object",
+          "required": [
+            "data",
+            "type"
+          ],
+          "properties": {
+            "data": {
+              "type": "object",
+              "required": [
+                "image_url"
+              ],
+              "properties": {
+                "image_url": {
+                  "type": "string"
+                }
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "image"
+              ],
+              "title": "ImageInputItemType"
+            }
+          },
+          "title": "ImageInputItem"
+        },
+        {
+          "type": "object",
+          "required": [
+            "data",
+            "type"
+          ],
+          "properties": {
+            "data": {
+              "type": "object",
+              "required": [
+                "path"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              }
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "localImage"
+              ],
+              "title": "LocalImageInputItemType"
+            }
+          },
+          "title": "LocalImageInputItem"
+        }
+      ]
+    }
+  }
+}

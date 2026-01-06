@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AuthStatusChangeNotification",
+  "description": "Deprecated notification. Use AccountUpdatedNotification instead.",
+  "type": "object",
+  "properties": {
+    "authMethod": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AuthMode"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "AuthMode": {
+      "type": "string",
+      "enum": [
+        "apikey",
+        "chatgpt"
+      ]
+    }
+  }
+}

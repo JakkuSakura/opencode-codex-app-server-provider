@@ -1,14 +1,9 @@
 {
-  "name": "opencode-codex-exec-provider",
+  "name": "opencode-codex-app-server-provider",
   "version": "0.1.0",
+  "description": "OpenCode provider that talks to codex app-server over stdio",
   "type": "module",
-  "main": "./index.js",
-  "exports": {
-    ".": "./index.js"
-  },
-  "files": [
-    "index.js",
-    "index.d.ts",
-    "README.md"
-  ]
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT"
 }

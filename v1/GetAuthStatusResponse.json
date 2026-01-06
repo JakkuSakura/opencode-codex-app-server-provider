@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GetAuthStatusResponse",
+  "type": "object",
+  "properties": {
+    "authMethod": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AuthMode"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "authToken": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "requiresOpenaiAuth": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "definitions": {
+    "AuthMode": {
+      "type": "string",
+      "enum": [
+        "apikey",
+        "chatgpt"
+      ]
+    }
+  }
+}
