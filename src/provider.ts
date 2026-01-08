@@ -178,6 +178,13 @@ export function normalizeResponsesOptions(
   if ("maxOutputTokens" in normalized) {
     delete (normalized as any).maxOutputTokens;
   }
+  normalized.providerOptions = {
+    ...(normalized.providerOptions ?? {}),
+    openai: {
+      ...(normalized.providerOptions?.openai ?? {}),
+      store: true,
+    },
+  };
   return normalized;
 }
 

@@ -133,6 +133,13 @@ export function normalizeResponsesOptions(options, instructionOptions) {
     if ("maxOutputTokens" in normalized) {
         delete normalized.maxOutputTokens;
     }
+    normalized.providerOptions = {
+        ...(normalized.providerOptions ?? {}),
+        openai: {
+            ...(normalized.providerOptions?.openai ?? {}),
+            store: true,
+        },
+    };
     return normalized;
 }
 async function collectStreamResult(stream) {
