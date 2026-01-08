@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createOpenAI } from "@ai-sdk/openai";
 import { applyQueryParams, loadCodexConfig, resolveModel, CodexProviderOptions } from "./config";
 
@@ -16,6 +17,11 @@ export function selectModel(
 const DEFAULT_CODEX_INSTRUCTIONS =
   "You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer.";
 
+const ASSETS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../assets");
+const BUNDLED_PROMPT = path.join(ASSETS_DIR, "prompt.md");
+const BUNDLED_CODEX_PROMPT = path.join(ASSETS_DIR, "gpt_5_codex_prompt.md");
+const BUNDLED_APPLY_PATCH = path.join(ASSETS_DIR, "apply_patch_tool_instructions.md");
+
 type ProviderOptions = {
   [provider: string]: Record<string, unknown>;
 };
@@ -28,10 +34,12 @@ type CallOptions = {
 
 type InstructionOptions = {
   codexHome: string;
+  modelId: string;
   instructions?: string;
   instructionsFile?: string;
   userInstructionsFile?: string;
   includeUserInstructions?: boolean;
+  tools?: unknown;
 };
 
 function readFileTrimmed(filePath: string): string | undefined {
@@ -44,6 +52,35 @@ function readFileTrimmed(filePath: string): string | undefined {
   }
 }
 
+function readBundled(filePath: string, fallback: string): string {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch {
+    return fallback;
+  }
+}
+
+function isCodexModel(modelId: string): boolean {
+  return modelId.includes("codex");
+}
+
+function needsSpecialApplyPatchInstructions(modelId: string): boolean {
+  if (isCodexModel(modelId)) return false;
+  return (
+    modelId.startsWith("o3") ||
+    modelId.startsWith("o4-mini") ||
+    modelId.startsWith("gpt-4.1") ||
+    modelId.startsWith("gpt-4o") ||
+    modelId.startsWith("gpt-3.5") ||
+    modelId.startsWith("gpt-5")
+  );
+}
+
+function hasApplyPatchTool(tools: unknown): boolean {
+  if (!Array.isArray(tools)) return false;
+  return tools.some((tool: any) => tool?.name === "apply_patch");
+}
+
 function resolveBaseInstructions(opts: InstructionOptions): string {
   const fromFile =
     opts.instructionsFile && path.isAbsolute(opts.instructionsFile)
@@ -52,7 +89,18 @@ function resolveBaseInstructions(opts: InstructionOptions): string {
         ? readFileTrimmed(path.join(opts.codexHome, opts.instructionsFile))
         : undefined;
   const fromInline = opts.instructions?.trim();
-  return fromFile ?? fromInline ?? DEFAULT_CODEX_INSTRUCTIONS;
+  if (fromFile ?? fromInline) return fromFile ?? fromInline ?? DEFAULT_CODEX_INSTRUCTIONS;
+
+  if (isCodexModel(opts.modelId)) {
+    return readBundled(BUNDLED_CODEX_PROMPT, DEFAULT_CODEX_INSTRUCTIONS);
+  }
+
+  const base = readBundled(BUNDLED_PROMPT, DEFAULT_CODEX_INSTRUCTIONS);
+  if (needsSpecialApplyPatchInstructions(opts.modelId) && !hasApplyPatchTool(opts.tools)) {
+    const applyPatch = readBundled(BUNDLED_APPLY_PATCH, "");
+    return applyPatch.trim().length > 0 ? `${base}\n${applyPatch}` : base;
+  }
+  return base;
 }
 
 function resolveUserInstructions(opts: InstructionOptions): string | undefined {
@@ -99,7 +147,10 @@ export function withResponsesInstructions(
   const existing = options.providerOptions?.openai?.instructions;
   if (typeof existing === "string" && existing.length > 0) return options;
 
-  const instructions = resolveBaseInstructions(instructionOptions);
+  const instructions = resolveBaseInstructions({
+    ...instructionOptions,
+    tools: options.tools,
+  });
   const userInstructions = resolveUserInstructions(instructionOptions);
   const nextPrompt =
     userInstructions && !hasUserInstructionsTag(options.prompt)
@@ -156,6 +207,7 @@ export function createLanguageModel(
   if (wireApi === "responses") {
     return wrapResponsesModel(model, {
       codexHome: config.codexHome,
+      modelId: resolvedModel,
       instructions: options.instructions,
       instructionsFile: options.instructionsFile,
       userInstructionsFile: options.userInstructionsFile,

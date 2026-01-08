@@ -50,7 +50,10 @@ test("withResponsesInstructions preserves existing instructions", () => {
     },
   };
 
-  const next = withResponsesInstructions(options as any, { codexHome: os.tmpdir() });
+  const next = withResponsesInstructions(options as any, {
+    codexHome: os.tmpdir(),
+    modelId: "gpt-5.2-codex",
+  });
   assert.equal((next.providerOptions as any).openai.instructions, "Keep this.");
 });
 
@@ -61,6 +64,7 @@ test("withResponsesInstructions uses override when provided", () => {
 
   const next = withResponsesInstructions(options as any, {
     codexHome: os.tmpdir(),
+    modelId: "gpt-5.2-codex",
     instructions: "Override instructions.",
   });
   const instr = (next.providerOptions as any).openai.instructions as string;
@@ -74,6 +78,7 @@ test("withResponsesInstructions loads instructions from file", () => {
 
   const next = withResponsesInstructions({ prompt: [] } as any, {
     codexHome: dir,
+    modelId: "gpt-5.2-codex",
     instructionsFile: file,
   });
   const instr = (next.providerOptions as any).openai.instructions as string;
@@ -86,8 +91,18 @@ test("withResponsesInstructions injects user instructions from AGENTS", () => {
 
   const next = withResponsesInstructions({ prompt: [{ role: "user", content: "hi" }] } as any, {
     codexHome: dir,
+    modelId: "gpt-5.2-codex",
   });
   const prompt = next.prompt as any[];
   assert.equal(prompt[0].role, "user");
   assert.ok(prompt[0].content[0].text.includes("<user_instructions>"));
+});
+
+test("withResponsesInstructions uses bundled codex prompt for codex models", () => {
+  const next = withResponsesInstructions({ prompt: [] } as any, {
+    codexHome: os.tmpdir(),
+    modelId: "gpt-5.2-codex",
+  });
+  const instr = (next.providerOptions as any).openai.instructions as string;
+  assert.ok(instr.startsWith("You are Codex, based on GPT-5."));
 });

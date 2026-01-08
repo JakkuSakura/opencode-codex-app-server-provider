@@ -14,10 +14,12 @@ type CallOptions = {
 };
 type InstructionOptions = {
     codexHome: string;
+    modelId: string;
     instructions?: string;
     instructionsFile?: string;
     userInstructionsFile?: string;
     includeUserInstructions?: boolean;
+    tools?: unknown;
 };
 export declare function withResponsesInstructions(options: CallOptions, instructionOptions: InstructionOptions): CallOptions;
 export declare function createLanguageModel(provider: string, modelId: string | undefined, options: CodexProviderOptions, overrideWireApi?: WireApi): any;
