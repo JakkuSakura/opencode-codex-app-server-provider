@@ -65,6 +65,7 @@ Edit `~/.config/opencode/opencode.json`:
 - The provider reads `~/.codex/config.toml` on each request and uses the selected `model_provider` and `model`.
 - API keys are resolved from `~/.codex/auth.json` (same as Codex CLI) or from the env var specified by `env_key`.
 - `wire_api` controls whether requests go through Chat Completions (`chat`) or Responses (`responses`).
+- This provider does not support OpenAI's official consumer Codex endpoints; use a platform API base URL or a compatible proxy.
 
 ## Options
 
