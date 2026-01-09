@@ -4,14 +4,11 @@ import { fileURLToPath } from "node:url";
 import { createOpenAI } from "@ai-sdk/openai";
 import { applyQueryParams, loadCodexConfig, resolveModel, CodexProviderOptions } from "./config.js";
 
-type WireApi = "chat" | "responses";
-
 export function selectModel(
-  client: { chat: (id: string) => unknown; responses: (id: string) => unknown },
-  wireApi: WireApi,
+  client: { responses: (id: string) => unknown },
   modelId: string,
 ): unknown {
-  return wireApi === "chat" ? client.chat(modelId) : client.responses(modelId);
+  return client.responses(modelId);
 }
 
 const DEFAULT_CODEX_INSTRUCTIONS =
@@ -22,9 +19,7 @@ const BUNDLED_PROMPT = path.join(ASSETS_DIR, "prompt.md");
 const BUNDLED_CODEX_PROMPT = path.join(ASSETS_DIR, "gpt_5_codex_prompt.md");
 const BUNDLED_APPLY_PATCH = path.join(ASSETS_DIR, "apply_patch_tool_instructions.md");
 
-type ProviderOptions = {
-  [provider: string]: Record<string, unknown>;
-};
+type ProviderOptions = Record<string, Record<string, unknown>>;
 
 type CallOptions = {
   prompt?: unknown;
@@ -343,10 +338,8 @@ function wrapResponsesModel(model: any, instructionOptions: InstructionOptions):
 }
 
 export function createLanguageModel(
-  provider: string,
   modelId: string | undefined,
   options: CodexProviderOptions,
-  overrideWireApi?: WireApi,
 ): any {
   const config = loadCodexConfig(options);
   const resolvedModel = resolveModel(config.model, modelId, options.useCodexConfigModel);
@@ -365,17 +358,13 @@ export function createLanguageModel(
     headers: config.headers,
   });
 
-  const wireApi = overrideWireApi ?? config.wireApi;
-  const model = selectModel(client, wireApi, resolvedModel);
-  if (wireApi === "responses") {
-    return wrapResponsesModel(model, {
-      codexHome: config.codexHome,
-      modelId: resolvedModel,
-      instructions: options.instructions,
-      instructionsFile: options.instructionsFile,
-      userInstructionsFile: options.userInstructionsFile,
-      includeUserInstructions: options.includeUserInstructions,
-    });
-  }
-  return model;
+  const model = selectModel(client, resolvedModel);
+  return wrapResponsesModel(model, {
+    codexHome: config.codexHome,
+    modelId: resolvedModel,
+    instructions: options.instructions,
+    instructionsFile: options.instructionsFile,
+    userInstructionsFile: options.userInstructionsFile,
+    includeUserInstructions: options.includeUserInstructions,
+  });
 }

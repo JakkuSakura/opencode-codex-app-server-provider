@@ -7,7 +7,6 @@ export type ProviderConfig = {
   name?: string;
   base_url?: string;
   env_key?: string;
-  wire_api?: "chat" | "responses";
   query_params?: Record<string, string | number | boolean>;
   http_headers?: Record<string, string>;
   env_http_headers?: Record<string, string>;
@@ -18,7 +17,6 @@ export type CodexConfig = {
   codexHome: string;
   providerId: string;
   model: string;
-  wireApi: "chat" | "responses";
   baseUrl?: string;
   apiKey?: string | null;
   headers: Record<string, string>;
@@ -29,6 +27,7 @@ export type CodexProviderOptions = {
   name?: string;
   codexHome?: string;
   useCodexConfigModel?: boolean;
+  apiKeys?: Record<string, string>;
   instructions?: string;
   instructionsFile?: string;
   userInstructionsFile?: string;
@@ -48,9 +47,6 @@ function readJsonIfExists(filePath: string): Record<string, string> | null {
   }
 }
 
-function resolveDefaultWireApi(providerId: string): "chat" | "responses" {
-  return providerId === "openai" ? "responses" : "chat";
-}
 
 function resolveBaseUrl(providerId: string, providerConfig: ProviderConfig): string | undefined {
   if (providerConfig.base_url) return providerConfig.base_url;
@@ -77,6 +73,15 @@ function resolveApiKey(
   return null;
 }
 
+function resolveApiKeyOverride(
+  providerId: string,
+  options: CodexProviderOptions,
+): string | null {
+  if (options.useCodexConfigModel !== false) return null;
+  if (!options.apiKeys) return null;
+  return options.apiKeys[providerId] ?? null;
+}
+
 export function loadCodexConfig(options: CodexProviderOptions = {}): CodexConfig {
   const codexHome =
     options.codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
@@ -94,15 +99,10 @@ export function loadCodexConfig(options: CodexProviderOptions = {}): CodexConfig
   const providerTable = (config.model_providers as TomlTable | undefined) ?? {};
   const providerConfig = isProviderConfig(providerTable[providerId] as TomlTable | undefined);
 
-  const wireApi = providerConfig.wire_api ?? resolveDefaultWireApi(providerId);
-  if (wireApi !== "chat" && wireApi !== "responses") {
-    throw new Error(`Unsupported wire_api: ${String(wireApi)}`);
-  }
-
   const baseUrl = resolveBaseUrl(providerId, providerConfig);
   const requiresOpenaiAuth = resolveRequiresOpenaiAuth(providerId, providerConfig);
   const envKey = providerConfig.env_key ?? (requiresOpenaiAuth ? "OPENAI_API_KEY" : null);
-  const apiKey = resolveApiKey(requiresOpenaiAuth, envKey, auth);
+  const apiKey = resolveApiKeyOverride(providerId, options) ?? resolveApiKey(requiresOpenaiAuth, envKey, auth);
 
   const headers: Record<string, string> = { ...(providerConfig.http_headers ?? {}) };
   const envHeaders = providerConfig.env_http_headers ?? {};
@@ -115,7 +115,6 @@ export function loadCodexConfig(options: CodexProviderOptions = {}): CodexConfig
     codexHome,
     providerId,
     model,
-    wireApi,
     baseUrl,
     apiKey,
     headers,

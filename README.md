@@ -1,6 +1,10 @@
 # opencode-codex-provider
 
-OpenCode provider that reads `~/.codex/config.toml` and uses the configured Codex model provider + API key.
+OpenCode provider that reads `~/.codex/config.toml` and uses the configured Codex model provider + API key. Branding name: Codex.
+
+## LLM installation help
+
+If you want an LLM to help you install or configure this provider, you can paste the full README into OpenCode and ask it to follow the setup section to install and set you to be the default model. Check if there exists `~/.codex` to configure the config properly.
 
 ## Setup
 
@@ -27,13 +31,13 @@ Edit `~/.config/opencode/opencode.json`:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "codex-config/default",
+  "model": "codex/default",
   "provider": {
-    "codex-config": {
-      "npm": "file:///Users/jakku/Dev/opencode-codex-provider",
-      "name": "Codex Config",
+    "codex": {
+      "npm": "file:///path/to/opencode-codex-provider",
+      "name": "Codex",
       "options": {
-        "codexHome": "/Users/jakku/.codex",
+        "codexHome": "~/.codex",
         "useCodexConfigModel": true
       },
       "models": {
@@ -58,7 +62,7 @@ Edit `~/.config/opencode/opencode.json`:
 
 6) Restart OpenCode.
 
-7) In the TUI, run `/models` and select `codex-config/default`.
+7) In the TUI, run `/models` and select `codex/default`.
 
 ## Oh-My-OpenCode (default model override)
 
@@ -69,35 +73,31 @@ Oh-My-OpenCode can override agent model choices. To make all agents use Codex, u
   "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-opencode/master/assets/oh-my-opencode.schema.json",
   "agents": {
     "Sisyphus": {
-      "model": "codex-config/default"
+      "model": "codex/default"
     },
     "librarian": {
-      "model": "codex-config/default"
+      "model": "codex/default"
     },
     "explore": {
-      "model": "codex-config/default"
+      "model": "codex/default"
     },
     "oracle": {
-      "model": "codex-config/default"
+      "model": "codex/default"
     },
     "frontend-ui-ux-engineer": {
-      "model": "codex-config/default"
+      "model": "codex/default"
     },
     "document-writer": {
-      "model": "codex-config/default"
+      "model": "codex/default"
     },
     "multimodal-looker": {
-      "model": "codex-config/default"
+      "model": "codex/default"
     }
   }
 }
 ```
 
 Reference: https://github.com/code-yeongyu/oh-my-opencode
-
-## LLM installation help
-
-If you want an LLM to help you install or configure this provider, you can paste the full README into OpenCode and ask it to follow the steps. Copy paste the whole page into opencode.
 
 ## Image input
 
@@ -116,31 +116,44 @@ See https://opencode.ai/docs/plugins/ for details.
 
 - The provider reads `~/.codex/config.toml` on each request and uses the selected `model_provider` and `model`.
 - API keys are resolved from `~/.codex/auth.json` (same as Codex CLI) or from the env var specified by `env_key`.
-- `wire_api` controls whether requests go through Chat Completions (`chat`) or Responses (`responses`).
 - This provider does not support OpenAI's official consumer Codex endpoints; use a platform API base URL or a compatible proxy.
+
+## Available models
+
+- `gpt-5.2`: none/low/medium/high/xhigh
+- `gpt-5.2-codex`: low/medium/high/xhigh
+- `gpt-5.1-codex-max`: low/medium/high/xhigh
+- `gpt-5.1-codex`: low/medium/high
+- `gpt-5.1-codex-mini`: medium/high
+- `gpt-5.1`: none/low/medium/high
 
 ## Options
 
 - `codexHome`: path to Codex home (default: `~/.codex`)
 - `useCodexConfigModel`: when true, always use the model from `~/.codex/config.toml`
+- `apiKeys`: when `useCodexConfigModel` is false, an optional map of provider id → API key to override `~/.codex/auth.json`
 
 ### useCodexConfigModel = false
 
-When `useCodexConfigModel` is false, OpenCode controls the model selection. The provider will use the model passed by OpenCode (or the default `codex-config/default`), and ignore `model` in `~/.codex/config.toml`.
+When `useCodexConfigModel` is false, OpenCode controls the model selection. The provider will use the model passed by OpenCode (or the default `codex/default`), and ignore `model` in `~/.codex/config.toml`.
 
 **Example (use OpenCode model selection):**
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "codex-config/default",
+  "model": "codex/default",
   "provider": {
-    "codex-config": {
-      "npm": "file:///Users/jakku/Dev/opencode-codex-provider",
-      "name": "Codex Config",
+    "codex": {
+      "npm": "file:///path/to/opencode-codex-provider",
+      "name": "Codex",
       "options": {
-        "codexHome": "/Users/jakku/.codex",
-        "useCodexConfigModel": false
+        "codexHome": "~/.codex",
+        "useCodexConfigModel": false,
+        "apiKeys": {
+          "openai": "sk-...",
+          "tabcode": "sk-..."
+        }
       },
       "models": {
         "default": {
@@ -165,4 +178,4 @@ When `useCodexConfigModel` is false, OpenCode controls the model selection. The 
 }
 ```
 
-Then pick a model in OpenCode (e.g., `/models` → `codex-config/fast`).
+Then pick a model in OpenCode (e.g., `/models` → `codex/fast`).
