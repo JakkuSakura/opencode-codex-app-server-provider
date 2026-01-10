@@ -54,12 +54,6 @@ Edit `~/.config/opencode/opencode.json`:
         },
         "//": "server: selects which server entry to use from servers (if omitted, defaults to the server from ~/.codex/config.toml)",
         "server": "server-1",
-        "//": "modelServers: per-model override of servers/server",
-        "modelServers": {
-          "gpt-5.2-codex": {
-            "server": "server-2"
-          }
-        },
         "//": "pricing: optional per-million token cost to compute providerMetadata.costUsd",
         "pricing": {
           "input_per_mtoken": 5.0,
@@ -77,7 +71,9 @@ Edit `~/.config/opencode/opencode.json`:
           "options": {
             "reasoningEffort": "medium",
             "reasoningSummary": "auto",
-            "textVerbosity": "medium"
+            "textVerbosity": "medium",
+            "//": "server: optional per-model override of servers/server",
+            "server": "server-2"
           }
         },
         "gpt-5.2-none": {
