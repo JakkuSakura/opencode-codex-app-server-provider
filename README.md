@@ -12,10 +12,12 @@ If you want an LLM to help you install or configure this provider, you can paste
 
 2) Configure Codex in `~/.codex/config.toml` and login (`codex login`).
 
-3) Clone this repo:
+3) Clone this repo into the OpenCode providers directory:
 
 ```bash
-git clone https://github.com/JakkuSakura/opencode-codex-provider
+mkdir -p ~/.config/opencode/providers
+
+git clone https://github.com/JakkuSakura/opencode-codex-provider ~/.config/opencode/providers/opencode-codex-provider
 ```
 
 4) Install dependencies (pnpm) and build if you plan to edit TypeScript:
@@ -38,6 +40,7 @@ Edit `~/.config/opencode/opencode.json`:
       "name": "Codex",
       "options": {
         "codexHome": "~/.codex",
+        "//": "codexHome: path to Codex home (default: ~/.codex)",
         "servers": {
           "server-1": {
             "api_key": "sk-...",
@@ -48,16 +51,20 @@ Edit `~/.config/opencode/opencode.json`:
             "base_url": "https://api.example.com/v1"
           }
         },
+        "//": "servers: optional map of server name -> { api_key, base_url }",
         "server": "server-1",
+        "//": "server: selects which server entry to use from servers (if omitted, defaults to the server from ~/.codex/config.toml)",
         "modelServers": {
           "gpt-5.2-codex": {
             "server": "server-2"
           }
         },
+        "//": "modelServers: per-model override of servers/server",
         "pricing": {
           "input_per_mtoken": 5.0,
           "output_per_mtoken": 15.0
-        }
+        },
+        "//": "pricing: optional per-million token cost to compute providerMetadata.costUsd"
       },
       "models": {
         "default": {
@@ -350,15 +357,6 @@ OpenCode uses the Vercel AI SDK. For images, send a message part with `type: "im
 - The provider reads `~/.codex/config.toml` on each request and uses the selected `model_provider` and `model`.
 - API keys are resolved from `~/.codex/auth.json` (same as Codex CLI) or from the env var specified by `env_key`.
 - This provider does not support OpenAI's official consumer Codex endpoints; use a platform API base URL or a compatible proxy.
-
-## Available models
-
-- `gpt-5.2`: none/low/medium/high/xhigh
-- `gpt-5.2-codex`: low/medium/high/xhigh
-- `gpt-5.1-codex-max`: low/medium/high/xhigh
-- `gpt-5.1-codex`: low/medium/high
-- `gpt-5.1-codex-mini`: medium/high
-- `gpt-5.1`: none/low/medium/high
 
 ## Options
 
