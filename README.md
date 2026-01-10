@@ -39,8 +39,9 @@ Edit `~/.config/opencode/opencode.json`:
       "npm": "file:///path/to/opencode-codex-provider",
       "name": "Codex",
       "options": {
-        "codexHome": "~/.codex",
         "//": "codexHome: path to Codex home (default: ~/.codex)",
+        "codexHome": "~/.codex",
+        "//": "servers: optional map of server name -> { api_key, base_url }",
         "servers": {
           "server-1": {
             "api_key": "sk-...",
@@ -51,20 +52,19 @@ Edit `~/.config/opencode/opencode.json`:
             "base_url": "https://api.example.com/v1"
           }
         },
-        "//": "servers: optional map of server name -> { api_key, base_url }",
-        "server": "server-1",
         "//": "server: selects which server entry to use from servers (if omitted, defaults to the server from ~/.codex/config.toml)",
+        "server": "server-1",
+        "//": "modelServers: per-model override of servers/server",
         "modelServers": {
           "gpt-5.2-codex": {
             "server": "server-2"
           }
         },
-        "//": "modelServers: per-model override of servers/server",
+        "//": "pricing: optional per-million token cost to compute providerMetadata.costUsd",
         "pricing": {
           "input_per_mtoken": 5.0,
           "output_per_mtoken": 15.0
-        },
-        "//": "pricing: optional per-million token cost to compute providerMetadata.costUsd"
+        }
       },
       "models": {
         "default": {
